@@ -8,7 +8,7 @@ $db_name = 'book_catalog';
 $db_user = 'root';
 $db_pass = '';
 
-define('APP_NAME', 'Book Catalog System');                                  // name in the top bar
+define('APP_NAME', 'SpaceBook');                                  // name in the top bar
 define('FINE_PER_DAY', 10);                                                 // pesos per overdue day
 define('ADMIN_REGISTRATION_CODE', getenv('BOOK_ADMIN_CODE') ?: 'BOOK-ADMIN-2026');
 
@@ -37,6 +37,13 @@ function query($db, $sql, $params = array())
 // TEXT AND DATES
 // ---------------------------------------------------------------------------
 function e($value) { return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); }
+
+// Date only, e.g. Aug 25, 2025
+function short_date($value)
+{
+    $time = strtotime((string) $value);
+    return $time ? date('M d, Y', $time) : '';
+}
 
 function read_date($value)
 {
@@ -121,6 +128,12 @@ function icon($name, $size = 20)
         'user'   => '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
         'mail'   => '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
         'lock'   => '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+        'grid'     => '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+        'books'    => '<path d="M4 3v18M9 3v18"/><path d="m14 5 4-1 3 16-4 1z"/>',
+        'check'    => '<path d="m5 12 5 5L20 7"/>',
+        'alert'    => '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+        'wallet'   => '<path d="M20 7H5a2 2 0 0 1 0-4h13v4"/><path d="M3 5v14a2 2 0 0 0 2 2h15V7"/><path d="M16 14h.01"/>',
+        'download' => '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
     );
     return '<svg class="icon" width="' . (int) $size . '" height="' . (int) $size . '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . ($paths[$name] ?? '') . '</svg>';
 }
@@ -234,6 +247,36 @@ function page_top($page_class = '', $show_search = false)
     </div>
 </header>
 <?php } ?>
+<?php
+// SIDEBAR (students and admins): links, then the signed-in person at the bottom
+$GLOBALS['has_sidebar'] = $me && $page_class !== 'auth-page';
+if ($GLOBALS['has_sidebar']) {
+    global $db;
+    $me_is_admin = $me['role'] === 'ADMIN';
+    $on_account = in_array(get_text('view'), array('account', 'receipt'), true);
+    $on_tracking = basename($_SERVER['SCRIPT_NAME']) === 'admin.php' && get_text('view') !== 'form';
+    $loan_count = $me_is_admin ? 0 : (int) query($db, 'SELECT COUNT(*) FROM borrowings WHERE user_id = ? AND returned_at IS NULL', array($me['id']))->fetchColumn();
+?>
+<div class="app-shell">
+<aside class="sidebar">
+    <p class="sidebar-label"><?php echo $me_is_admin ? 'Administration' : 'My Library'; ?></p>
+    <nav class="sidebar-nav">
+    <?php if ($me_is_admin) { ?>
+        <a class="sidebar-link<?php echo $on_tracking ? '' : ' active'; ?>" href="index.php"><?php echo icon('books', 20); ?> Manage books</a>
+        <a class="sidebar-link<?php echo $on_tracking ? ' active' : ''; ?>" href="admin.php"><?php echo icon('user', 20); ?> Borrowed tracking</a>
+    <?php } else { ?>
+        <a class="sidebar-link<?php echo $on_account ? '' : ' active'; ?>" href="index.php"><?php echo icon('grid', 20); ?> Browse catalog</a>
+        <a class="sidebar-link<?php echo $on_account ? ' active' : ''; ?>" href="index.php?view=account"><?php echo icon('books', 20); ?> My borrowed books<?php if ($loan_count > 0) { echo '<span class="sidebar-badge">' . $loan_count . '</span>'; } ?></a>
+    <?php } ?>
+    </nav>
+    <div class="sidebar-foot">
+        <span class="avatar avatar-small"><?php echo e(initials($me_name)); ?></span>
+        <span class="user-text"><strong><?php echo e($me_name); ?></strong><small><?php echo $me_is_admin ? 'Administrator' : 'Library member'; ?></small></span>
+        <a class="sidebar-out" href="auth.php?mode=logout" title="Logout" aria-label="Logout"><?php echo icon('logout', 18); ?></a>
+    </div>
+</aside>
+<div class="app-main">
+<?php } ?>
 <main class="wrap">
 <?php
     // [15] NOTICES: green message after an action
@@ -247,6 +290,7 @@ function page_bottom()
 {
     ?>
 </main>
+<?php if (!empty($GLOBALS['has_sidebar'])) { echo '</div></div>'; } ?>
 </body>
 </html>
 <?php

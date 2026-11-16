@@ -71,6 +71,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash'] = $ok ? 'Book returned.' : 'Could not return that book.';
     }
 
+    // ---- Renew a loan (once, 14 more days, only before it is overdue) ----
+    if ($do === 'renew') {
+        $ok = false;
+        try {
+            $ok = query($db, 'UPDATE borrowings SET due_at = DATE_ADD(due_at, INTERVAL 14 DAY), renewed = 1 WHERE id = ? AND user_id = ? AND returned_at IS NULL AND renewed = 0 AND due_at >= NOW()', array($id, $user_id))->rowCount() > 0;
+        } catch (PDOException $error) {
+            $ok = false;   // happens when the renewed column has not been added yet
+        }
+        $_SESSION['flash'] = $ok ? 'Loan renewed for 14 more days.' : 'This book could not be renewed. A loan can be renewed once, and only before it is overdue.';
+        header('Location: index.php?view=account');
+        exit;
+    }
+
     // ---- Pay a fine (demo payment, then show the receipt) ----
     if ($do === 'pay') {
         $loan = query($db, 'SELECT borrowings.*, COALESCE((SELECT SUM(amount) FROM fine_payments WHERE borrowing_id = borrowings.id), 0) AS paid FROM borrowings WHERE borrowings.id = ? AND borrowings.user_id = ?', array($id, $user_id))->fetch();
@@ -99,11 +112,44 @@ if ($view === 'account') {
     $account = query($db, 'SELECT full_name, email, username, created_at FROM users WHERE id = ?', array($user_id))->fetch();
 
     // Every loan this student has had, with how much of the fine is already paid
-    $loans = query($db, 'SELECT borrowings.*, books.title, books.author, COALESCE((SELECT SUM(amount) FROM fine_payments WHERE borrowing_id = borrowings.id), 0) AS paid FROM borrowings JOIN books ON books.id = borrowings.book_id WHERE borrowings.user_id = ? ORDER BY borrowings.borrowed_at DESC', array($user_id))->fetchAll();
+    $loans = query($db, 'SELECT borrowings.*, books.title, books.author, books.cover_image, COALESCE((SELECT SUM(amount) FROM fine_payments WHERE borrowing_id = borrowings.id), 0) AS paid FROM borrowings JOIN books ON books.id = borrowings.book_id WHERE borrowings.user_id = ? ORDER BY borrowings.borrowed_at DESC', array($user_id))->fetchAll();
 
     page_top();
     ?>
-<div class="heading"><div><p class="eyebrow">Student account</p><h1>My account</h1></div></div>
+<?php $current = array_values(array_filter($loans, function ($l) { return !$l['returned_at']; })); ?>
+<div class="heading"><div><p class="eyebrow">My Account</p><h1>My Borrowed books</h1><p class="heading-sub">Manage your currently borrowed books.</p></div></div>
+
+<!-- CURRENTLY BORROWED: cover, dates, status, View Details and Renew -->
+<section class="admin-panel borrowed-panel">
+    <div class="table-scroll">
+    <table class="books-table is-cards borrowed-table">
+        <thead><tr><th>Book Cover</th><th>Book Title</th><th>Author</th><th>Borrow Date</th><th>Due Date</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+        <?php if (!$current) { echo '<tr class="row-empty"><td colspan="7">You have no borrowed books right now.</td></tr>'; } ?>
+        <?php foreach ($current as $l) {
+            $late = new DateTime($l['due_at']) < new DateTime();
+            $can_renew = !$late && isset($l['renewed']) && (int) $l['renewed'] === 0;
+        ?>
+        <tr>
+            <td><?php echo cover_html($l); ?></td>
+            <td><span class="book-title"><?php echo e($l['title']); ?></span></td>
+            <td><?php echo e($l['author']); ?></td>
+            <td><?php echo e(short_date($l['borrowed_at'])); ?></td>
+            <td class="due<?php echo $late ? ' due-late' : ''; ?>"><?php echo e(short_date($l['due_at'])); ?></td>
+            <td><span class="status <?php echo $late ? 'overdue' : 'available'; ?>"><?php echo $late ? 'Overdue' : 'Active'; ?></span></td>
+            <td class="actions actions-stack">
+                <a class="action-btn action-details" href="#loan-<?php echo (int) $l['id']; ?>">View Details</a>
+                <?php if ($can_renew) { ?>
+                <form method="post" action="index.php?do=renew&id=<?php echo (int) $l['id']; ?>"><?php echo csrf_field(); ?><button class="action-btn action-borrow">Renew</button></form>
+                <?php } ?>
+            </td>
+        </tr>
+        <?php } ?>
+        </tbody>
+    </table>
+    </div>
+</section>
+
 
 <!-- [05] CARDS and [12] ACCOUNT PAGE -->
 <section class="card account-info">
@@ -126,7 +172,7 @@ if ($view === 'account') {
         $status_text = $days_late ? 'Overdue by ' . $days_late . ' day(s)' : 'On loan';
     }
 ?>
-<section class="card loan">
+<section class="card loan" id="loan-<?php echo (int) $loan['id']; ?>">
     <h3><?php echo e($loan['title']); ?> <small>by <?php echo e($loan['author']); ?></small></h3>
     <p>Borrowed: <?php echo e(read_date($loan['borrowed_at'])); ?></p>
     <p>Return by: <?php echo e(read_date($loan['due_at'])); ?></p>
@@ -239,7 +285,8 @@ page_top('', !$is_admin);
 <?php } else { ?>
     <div>
         <p class="eyebrow">Browse the library</p>
-        <h1>Book Collection</h1>
+        <?php $first = $is_user ? strtok(trim((string) (($_SESSION['user']['name'] ?? '') ?: $_SESSION['user']['username'])), ' ') : ''; ?>
+        <h1><?php echo $is_user ? 'Good Day ' . e($first) . '!' : 'Book Collection'; ?></h1>
         <p class="heading-sub">Explore our curated collection of books across every subject.</p>
     </div>
     <span class="count-pill"><?php echo $total; ?> book<?php echo $total === 1 ? '' : 's'; ?> found</span>

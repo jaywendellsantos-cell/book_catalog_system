@@ -125,8 +125,62 @@ if ($view === 'form') {
 
 // ===========================================================================
 // CURRENT BORROWERS (default admin page)
+//   admin.php?filter=active|overdue    admin.php?page=2    admin.php?do=export (CSV)
 // ===========================================================================
-$borrowers = query($db, 'SELECT users.username, users.full_name, books.title, books.author, borrowings.borrowed_at, borrowings.due_at FROM borrowings JOIN users ON users.id = borrowings.user_id JOIN books ON books.id = borrowings.book_id WHERE borrowings.returned_at IS NULL ORDER BY borrowings.due_at, books.title')->fetchAll();
+$filter = get_text('filter');
+if ($filter !== 'active' && $filter !== 'overdue') $filter = '';
+
+$loans = query($db, 'SELECT users.username, users.full_name, users.email, books.title, books.author, borrowings.borrowed_at, borrowings.due_at FROM borrowings JOIN users ON users.id = borrowings.user_id JOIN books ON books.id = borrowings.book_id WHERE borrowings.returned_at IS NULL ORDER BY borrowings.due_at, books.title')->fetchAll();
+
+$count_overdue = 0;
+foreach ($loans as $i => $row) {
+    $loans[$i]['late'] = new DateTime($row['due_at']) < new DateTime();
+    if ($loans[$i]['late']) $count_overdue++;
+}
+$count_all = count($loans);
+$count_active = $count_all - $count_overdue;
+
+// Fines still unpaid on every loan (returned or not)
+$outstanding = 0;
+foreach (query($db, 'SELECT due_at, returned_at, COALESCE((SELECT SUM(amount) FROM fine_payments WHERE borrowing_id = borrowings.id), 0) AS paid FROM borrowings')->fetchAll() as $row) {
+    $outstanding += fine_owed($row);
+}
+
+// Apply the All / Active / Overdue tab
+$shown = array();
+foreach ($loans as $row) {
+    if ($filter === 'overdue' && !$row['late']) continue;
+    if ($filter === 'active' && $row['late']) continue;
+    $shown[] = $row;
+}
+
+// ---- Export reports: downloads the list on screen as a CSV file ----
+if (get_text('do') === 'export') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="borrowed-books-' . date('Y-m-d') . '.csv"');
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");   // lets Excel read the file as UTF-8
+    fputcsv($out, array('Borrower', 'Email', 'Book', 'Borrowed', 'Due', 'Status'));
+    foreach ($shown as $row) {
+        $cells = array($row['full_name'] !== '' ? $row['full_name'] : $row['username'], $row['email'], $row['title'], read_date($row['borrowed_at']), read_date($row['due_at']), $row['late'] ? 'Overdue' : 'Active');
+        foreach ($cells as $k => $cell) { $cells[$k] = preg_match('/^[=+\-@]/', (string) $cell) ? "'" . $cell : $cell; }   // stops spreadsheet formulas
+        fputcsv($out, $cells);
+    }
+    fclose($out);
+    exit;
+}
+
+// ---- Pages of 10 ----
+$per_page = 10;
+$pages = max(1, (int) ceil(count($shown) / $per_page));
+$page = min($pages, max(1, (int) get_text('page')));
+$shown = array_slice($shown, ($page - 1) * $per_page, $per_page);
+
+function borrowers_url($filter, $page = 1, $extra = array())
+{
+    $q = array_merge(array('filter' => $filter, 'page' => $page > 1 ? $page : ''), $extra);
+    return 'admin.php?' . http_build_query(array_filter($q, function ($v) { return $v !== '' && $v !== null; }));
+}
 
 page_top();
 ?>
@@ -134,29 +188,63 @@ page_top();
 <div class="heading">
     <div>
         <p class="eyebrow">Catalog Administration</p>
-        <h1>Current borrowers</h1>
-        <p class="heading-sub">These are the books that have not been returned yet.</p>
+        <h1>Borrowed <span class="amp">&amp;</span> Overdue</h1>
+        <p class="heading-sub">Monitor active loans, overdue items, and member accounts.</p>
     </div>
-    <a class="button button-outline" href="index.php">Back to books</a>
+    <div class="heading-actions">
+        <a class="button" href="<?php echo e(borrowers_url($filter, 1, array('do' => 'export'))); ?>"><?php echo icon('download', 18); ?> Export reports</a>
+    </div>
 </div>
 
+<!-- STATS -->
+<section class="stats-card">
+    <div class="stat"><span class="stat-icon stat-ok"><?php echo icon('check', 22); ?></span><div><strong><?php echo $count_active; ?></strong><span>Active</span></div></div>
+    <div class="stat"><span class="stat-icon stat-bad"><?php echo icon('alert', 22); ?></span><div><strong><?php echo $count_overdue; ?></strong><span>Overdue</span></div></div>
+    <div class="stat"><span class="stat-icon stat-fine"><?php echo icon('wallet', 22); ?></span><div><strong>₱<?php echo number_format($outstanding, 2); ?></strong><span>Outstanding fines</span></div></div>
+</section>
+
 <!-- [08] TABLES and [11] STATUS BADGES -->
-<div class="table-wrap">
-<table class="borrowers-table">
-    <thead><tr><th>Student</th><th>Book</th><th>Author</th><th>Borrowed</th><th>Return by</th><th>Loan status</th></tr></thead>
-    <tbody>
-    <?php if (!$borrowers) { echo '<tr class="row-empty"><td colspan="6">No books are currently borrowed.</td></tr>'; } ?>
-    <?php foreach ($borrowers as $row) { $late = new DateTime($row['due_at']) < new DateTime(); ?>
-    <tr>
-        <td><?php echo e($row['full_name'] !== '' ? $row['full_name'] : $row['username']); ?></td>
-        <td><?php echo e($row['title']); ?></td>
-        <td><span class="chip"><?php echo e($row['author']); ?></span></td>
-        <td><?php echo e(read_date($row['borrowed_at'])); ?></td>
-        <td><?php echo e(read_date($row['due_at'])); ?></td>
-        <td><span class="status <?php echo $late ? 'overdue' : 'available'; ?>"><?php echo $late ? 'Overdue' : 'On loan'; ?></span></td>
-    </tr>
+<section class="admin-panel">
+    <div class="tabs">
+        <a class="tab<?php echo $filter === '' ? ' active' : ''; ?>" href="<?php echo e(borrowers_url('')); ?>">All Borrowed</a>
+        <a class="tab<?php echo $filter === 'active' ? ' active' : ''; ?>" href="<?php echo e(borrowers_url('active')); ?>">Active</a>
+        <a class="tab<?php echo $filter === 'overdue' ? ' active' : ''; ?>" href="<?php echo e(borrowers_url('overdue')); ?>">Overdue</a>
+    </div>
+    <hr class="toolbar-line">
+    <div class="table-scroll">
+    <table class="books-table is-cards borrowers-table">
+        <thead><tr><th>Borrower</th><th>Book Title</th><th>Borrow Date</th><th>Due Date</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+        <?php if (!$shown) { echo '<tr class="row-empty"><td colspan="6">No books to show here.</td></tr>'; } ?>
+        <?php foreach ($shown as $row) {
+            $who = $row['full_name'] !== '' ? $row['full_name'] : $row['username'];
+            $mail = 'mailto:' . rawurlencode((string) $row['email'])
+                . '?subject=' . rawurlencode('Overdue book: ' . $row['title'])
+                . '&body=' . rawurlencode("Hello $who,\n\nThis is a reminder that \"" . $row['title'] . '" was due on ' . read_date($row['due_at']) . ". Please return it to the library. A fine of P" . FINE_PER_DAY . " per day applies.\n\nThank you.");
+        ?>
+        <tr>
+            <td class="borrower-cell"><span class="avatar avatar-small"><?php echo e(initials($who)); ?></span><span class="user-text"><strong><?php echo e($who); ?></strong><small><?php echo e($row['email']); ?></small></span></td>
+            <td><span class="book-title"><?php echo e($row['title']); ?></span></td>
+            <td><?php echo e(short_date($row['borrowed_at'])); ?></td>
+            <td class="due<?php echo $row['late'] ? ' due-late' : ''; ?>"><?php echo e(short_date($row['due_at'])); ?></td>
+            <td><span class="status <?php echo $row['late'] ? 'overdue' : 'available'; ?>"><?php echo $row['late'] ? 'Overdue' : 'Active'; ?></span></td>
+            <td class="actions">
+                <?php if ($row['late'] && $row['email']) { ?>
+                <a class="action-btn action-remind" href="<?php echo e($mail); ?>"><?php echo icon('mail', 16); ?> Send reminder</a>
+                <?php } else { echo '<span class="action-none"></span>'; } ?>
+            </td>
+        </tr>
+        <?php } ?>
+        </tbody>
+    </table>
+    </div>
+
+    <?php if ($pages > 1) { ?>
+    <nav class="pager" aria-label="Pages">
+        <?php if ($page > 1) { ?><a href="<?php echo e(borrowers_url($filter, $page - 1)); ?>">Previous</a><?php } ?>
+        <?php for ($p = 1; $p <= $pages; $p++) { ?><a class="<?php echo $p === $page ? 'current' : ''; ?>" href="<?php echo e(borrowers_url($filter, $p)); ?>"><?php echo $p; ?></a><?php } ?>
+        <?php if ($page < $pages) { ?><a href="<?php echo e(borrowers_url($filter, $page + 1)); ?>">Next</a><?php } ?>
+    </nav>
     <?php } ?>
-    </tbody>
-</table>
-</div>
+</section>
 <?php page_bottom(); ?>
