@@ -34,7 +34,7 @@ book_catalog_system/
 ## How to run
 
 ## Register as Admin
-Registration Code:  git branchBOOK-ADMIN-2026
+Registration Code: BOOK-ADMIN-2026
 
 
 ### 1. Prerequisites
