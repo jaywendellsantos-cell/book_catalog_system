@@ -274,7 +274,7 @@ page_top('', !$is_admin);
         <h1><?php echo $is_user ? 'Good Day ' . e($first) . '!' : 'Book Collection'; ?></h1>
         <p class="heading-sub">Explore our curated collection of books across every subject.</p>
     </div>
-    <span class="count-pill"><?php echo $total; ?> book<?php echo $total === 1 ? '' : 's'; ?> found</span>
+<!--    <span class="count-pill">--><?php //echo $total; ?><!-- book--><?php //echo $total === 1 ? '' : 's'; ?><!-- found</span>-->
 <?php } ?>
 </div>
 
