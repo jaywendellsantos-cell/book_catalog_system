@@ -74,10 +74,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($do === 'pay') {
         $loan = query($db, 'SELECT borrowings.*, COALESCE((SELECT SUM(amount) FROM fine_payments WHERE borrowing_id = borrowings.id), 0) AS paid FROM borrowings WHERE borrowings.id = ? AND borrowings.user_id = ?', array($id, $user_id))->fetch();
         $amount = $loan ? fine_owed($loan) : 0;
-        if ($amount > 0) {
+            if ($amount > 0) {
             $receipt_number = 'RCPT-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
             query($db, 'INSERT INTO fine_payments (borrowing_id, user_id, amount, payment_method, receipt_number) VALUES (?, ?, ?, ?, ?)', array($id, $user_id, $amount, 'DEMO', $receipt_number));
-            header('Location: index.php?view=receipt&id=' . (int) $db->lastInsertId());
+            $payment_id = (int) $db->lastInsertId();
+
+            if (empty($loan['returned_at']) && query($db, 'UPDATE borrowings SET returned_at = NOW() WHERE id = ? AND returned_at IS NULL', array($id))->rowCount() > 0) {
+                query($db, "UPDATE books SET available_copies = available_copies + 1, status = 'AVAILABLE' WHERE id = ?", array($loan['book_id']));
+            }
+
+            header('Location: index.php?view=receipt&id=' . $payment_id);
             exit;
         }
         $_SESSION['flash'] = 'There is no unpaid fine for that book.';
@@ -120,7 +126,9 @@ if ($view === 'account') {
             <td class="due<?php echo $late ? ' due-late' : ''; ?>"><?php echo e(short_date($l['due_at'])); ?></td>
             <td><span class="status <?php echo $late ? 'overdue' : 'available'; ?>"><?php echo $late ? 'Overdue' : 'Active'; ?></span></td>
             <td class="actions actions-stack">
+                <?php if (fine_owed($l) > 0) { ?>
                 <a class="action-btn action-details" href="#loan-<?php echo (int) $l['id']; ?>">View Details</a>
+                <?php } ?>
                 <?php if ($can_renew) { ?>
                 <form method="post" action="index.php?do=renew&id=<?php echo (int) $l['id']; ?>"><?php echo csrf_field(); ?><button class="action-btn action-borrow">Renew</button></form>
                 <?php } ?>
@@ -141,9 +149,12 @@ if ($view === 'account') {
     <p><strong>Member since:</strong> <?php echo e(read_date($account['created_at'])); ?></p>
 </section>
 
-<h2 class="section-title">Borrowing history and fines</h2>
-<?php if (!$loans) { echo "<div class='card'>You have not borrowed any books yet.</div>"; } ?>
-<?php foreach ($loans as $loan) {
+<h2 class="section-title">Fines to pay</h2>
+<?php
+$unpaid = array_filter($loans, function ($l) { return fine_owed($l) > 0; });
+if (!$unpaid) { echo "<div class='card'>You have no unpaid fines.</div>"; }
+?>
+<?php foreach ($unpaid as $loan) {
     $days_late = late_days($loan['due_at'], $loan['returned_at']);
     $fine = fine_owed($loan);
     if ($loan['returned_at']) {
@@ -159,7 +170,7 @@ if ($view === 'account') {
     <p>Status: <?php echo e($status_text); ?></p>
     <p>Overdue fine: <strong>₱<?php echo number_format($fine, 2); ?></strong> <small>(₱<?php echo FINE_PER_DAY; ?> per day)</small></p>
     <?php if ($fine > 0) { ?>
-    <form method="post" action="index.php?do=pay&id=<?php echo (int) $loan['id']; ?>" data-confirm="Pay your overdue balance of ₱<?php echo number_format($fine, 2); ?> ?" data-confirm-title="Pay fine">
+    <form method="post" action="index.php?do=pay&id=<?php echo (int) $loan['id']; ?>" data-confirm="Pay your overdue balance of ₱<?php echo number_format($fine, 2); ?> and return this book?" data-confirm-title="Pay fine">
         <?php echo csrf_field(); ?>
         <button class="button">Pay fine and get receipt</button>
     </form>
