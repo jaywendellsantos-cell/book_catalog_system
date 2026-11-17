@@ -19,7 +19,7 @@ if ($mode === 'logout') {
     exit;
 }
 
-// ---- First-admin setup is only allowed while there is no admin ----
+//Firstadmin setup is only allowed while there is no admin
 if ($mode === 'setup') {
     if ((int) query($db, "SELECT COUNT(*) FROM users WHERE role = 'ADMIN'")->fetchColumn() > 0) {
         http_response_code(403);
