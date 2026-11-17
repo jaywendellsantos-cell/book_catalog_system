@@ -1,17 +1,11 @@
 <?php
-// ADMIN: pages only an administrator can open.
-//   admin.php                      books that are borrowed right now
-//   admin.php?view=form            add a book
-//   admin.php?view=form&id=5       edit book 5
-// The Delete button on the book list sends POST to  admin.php?do=delete&id=...
+
 include_once 'db_connect.php';
 require_admin();
 
 $view = get_text('view') ?: 'borrowers';
 
-// ===========================================================================
-// DELETE A BOOK
-// ===========================================================================
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && get_text('do') === 'delete') {
     check_csrf();
     $id = (int) get_text('id');
@@ -34,9 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && get_text('do') === 'delete') {
     exit;
 }
 
-// ===========================================================================
-// ADD / EDIT A BOOK:  admin.php?view=form  (add)   admin.php?view=form&id=5  (edit)
-// ===========================================================================
+
 if ($view === 'form') {
     $id = (int) get_text('id');
     $editing = $id > 0;
@@ -92,7 +84,7 @@ if ($view === 'form') {
 
     page_top();
     ?>
-<!-- [04] PAGE HEADING -->
+<!-- PAGE HEADING -->
 <div class="heading">
     <div>
         <p class="eyebrow">Catalog Administration</p>
@@ -181,7 +173,7 @@ page_top();
 ?>
 <!-- heading -->
 <div class="heading">
-    <div>
+    <div class="borrow-heading">
         <p class="eyebrow">Catalog Administration</p>
         <h1>Borrowed <span class="amp">&amp;</span> Overdue</h1>
         <p class="heading-sub">Monitor active loans, overdue items, and member accounts.</p>
