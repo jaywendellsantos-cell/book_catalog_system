@@ -258,7 +258,7 @@ page_top('', !$is_admin);
 <!-- heading -->
 <div class="heading">
 <?php if ($is_admin) { ?>
-    <div>
+    <div class="heading-admin">
         <p class="eyebrow">Catalog Administration</p>
         <h1>Database Management</h1>
         <p class="heading-sub">Maintain book records, availability, and inventory.</p>
