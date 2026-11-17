@@ -1,19 +1,13 @@
 <?php
-// AUTH: sign in, register, sign out, and first-admin setup.
-//   auth.php                      student login          auth.php?type=admin            admin login
-//   auth.php?mode=register        student registration   auth.php?mode=register&type=admin   admin registration
-//   auth.php?mode=logout          sign out
-//   auth.php?mode=setup           create the very first admin (works only while no admin exists)
 include_once 'db_connect.php';
 
 $mode = get_text('mode') ?: 'login';
 if (!in_array($mode, array('login', 'register', 'logout', 'setup'), true)) $mode = 'login';
 $is_admin = get_text('type') === 'admin';
-$type_link = $is_admin ? '&type=admin' : '';      // keeps admin/student when moving between pages
+$type_link = $is_admin ? '&type=admin' : '';
 $error = '';
 $done = false;
 
-// ---- Sign out ----
 if ($mode === 'logout') {
     $_SESSION = array();
     if (ini_get('session.use_cookies')) {
@@ -34,7 +28,6 @@ if ($mode === 'setup') {
     $is_admin = true;
 }
 
-// ---- Form submitted ----
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     check_csrf();
 
@@ -57,7 +50,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $error = 'Username or password is incorrect for this account type.';
     } else {
-        // register (student or admin) and setup (admin, no code needed)
         $result = register_account($db, $_POST, $is_admin ? 'ADMIN' : 'USER', $mode !== 'setup');
         if ($result !== true) {
             $error = $result;
@@ -71,7 +63,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// ---- Text for the card ----
 if ($mode === 'login') {
     $eyebrow = 'Welcome back';
     $title = 'Sign in to your account';
@@ -84,7 +75,8 @@ if ($mode === 'login') {
 
 page_top('auth-page');
 ?>
-<!-- [16] LOGIN AND REGISTER -->
+
+<!-- login and register -->
 <section class="auth-card">
     <div class="auth-brand">
         <div class="auth-brand-left">

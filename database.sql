@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS books (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Sample book (id is generated automatically). Delete this line if you do not want it.
 INSERT INTO books (title, author, genre, year_published, total_copies, available_copies)
 VALUES ('Story of Sandra Mae Dimagiba', 'Jay Santos', 'Horror', 2026, 30, 30);
 
@@ -35,9 +34,8 @@ CREATE TABLE IF NOT EXISTS borrowings (
     borrowed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     due_at DATETIME NOT NULL,
     returned_at DATETIME NULL,
-    renewed TINYINT UNSIGNED NOT NULL DEFAULT 0,   -- 1 after the student has used the one allowed renewal
+    renewed TINYINT UNSIGNED NOT NULL DEFAULT 0,
     CONSTRAINT fk_borrowings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    -- RESTRICT: a book with loan history cannot be deleted, so loans and fine payments are never erased by accident.
     CONSTRAINT fk_borrowings_book FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE RESTRICT
 );
 
@@ -53,5 +51,3 @@ CREATE TABLE IF NOT EXISTS fine_payments (
     CONSTRAINT fk_payment_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- ALREADY IMPORTED AN OLDER database.sql? Run this one line once to add the Renew feature:
--- ALTER TABLE borrowings ADD COLUMN renewed TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER returned_at;

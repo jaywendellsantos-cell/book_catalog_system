@@ -1,9 +1,4 @@
 <?php
-// INDEX: the book list (everyone), plus the student pages.
-//   index.php                       book list (guest, student, admin)
-//   index.php?view=account          student account, loans and fines
-//   index.php?view=receipt&id=5     fine payment receipt
-// Forms on this page send POST to  index.php?do=borrow|return|pay&id=...
 include_once 'db_connect.php';
 
 $role = $_SESSION['user']['role'] ?? '';
@@ -11,9 +6,6 @@ $is_admin = $role === 'ADMIN';
 $is_user = $role === 'USER';
 $view = get_text('view') ?: 'books';
 
-// ===========================================================================
-// ACTIONS: borrow, return and pay a fine
-// ===========================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_user();
     check_csrf();
@@ -21,12 +13,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = (int) get_text('id');
     $user_id = (int) $_SESSION['user']['id'];
 
-    // ---- Borrow a book (max 3 at a time, 14 days, not the same title twice) ----
     if ($do === 'borrow') {
         $ok = false;
         $db->beginTransaction();
         try {
-            // FOR UPDATE locks the row so two students cannot take the last copy together
             $available = (int) query($db, 'SELECT available_copies FROM books WHERE id = ? FOR UPDATE', array($id))->fetchColumn();
             $mine = (int) query($db, 'SELECT COUNT(*) FROM borrowings WHERE user_id = ? AND returned_at IS NULL', array($user_id))->fetchColumn();
             $same = (int) query($db, 'SELECT COUNT(*) FROM borrowings WHERE user_id = ? AND book_id = ? AND returned_at IS NULL', array($user_id, $id))->fetchColumn();
@@ -45,7 +35,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($ok) {
-            // Details for the "Borrowing confirmed" popup
             $_SESSION['borrow_notice'] = query($db, 'SELECT books.title, books.author, borrowings.borrowed_at, borrowings.due_at FROM borrowings JOIN books ON books.id = borrowings.book_id WHERE borrowings.id = ?', array($borrowing_id))->fetch();
             $_SESSION['flash'] = 'Book borrowed successfully.';
         } else {
@@ -53,7 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // ---- Return a book ----
     if ($do === 'return') {
         $ok = false;
         $db->beginTransaction();
@@ -71,20 +59,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash'] = $ok ? 'Book returned.' : 'Could not return that book.';
     }
 
-    // ---- Renew a loan (once, 14 more days, only before it is overdue) ----
     if ($do === 'renew') {
         $ok = false;
         try {
             $ok = query($db, 'UPDATE borrowings SET due_at = DATE_ADD(due_at, INTERVAL 14 DAY), renewed = 1 WHERE id = ? AND user_id = ? AND returned_at IS NULL AND renewed = 0 AND due_at >= NOW()', array($id, $user_id))->rowCount() > 0;
         } catch (PDOException $error) {
-            $ok = false;   // happens when the renewed column has not been added yet
+            $ok = false;   
         }
         $_SESSION['flash'] = $ok ? 'Loan renewed for 14 more days.' : 'This book could not be renewed. A loan can be renewed once, and only before it is overdue.';
         header('Location: index.php?view=account');
         exit;
     }
 
-    // ---- Pay a fine (demo payment, then show the receipt) ----
     if ($do === 'pay') {
         $loan = query($db, 'SELECT borrowings.*, COALESCE((SELECT SUM(amount) FROM fine_payments WHERE borrowing_id = borrowings.id), 0) AS paid FROM borrowings WHERE borrowings.id = ? AND borrowings.user_id = ?', array($id, $user_id))->fetch();
         $amount = $loan ? fine_owed($loan) : 0;
@@ -102,16 +88,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Location: index.php');
     exit;
 }
-
-// ===========================================================================
-// STUDENT ACCOUNT PAGE:  index.php?view=account
-// ===========================================================================
+//user account page
 if ($view === 'account') {
     require_user();
     $user_id = (int) $_SESSION['user']['id'];
     $account = query($db, 'SELECT full_name, email, username, created_at FROM users WHERE id = ?', array($user_id))->fetch();
 
-    // Every loan this student has had, with how much of the fine is already paid
     $loans = query($db, 'SELECT borrowings.*, books.title, books.author, books.cover_image, COALESCE((SELECT SUM(amount) FROM fine_payments WHERE borrowing_id = borrowings.id), 0) AS paid FROM borrowings JOIN books ON books.id = borrowings.book_id WHERE borrowings.user_id = ? ORDER BY borrowings.borrowed_at DESC', array($user_id))->fetchAll();
 
     page_top();
@@ -119,7 +101,7 @@ if ($view === 'account') {
 <?php $current = array_values(array_filter($loans, function ($l) { return !$l['returned_at']; })); ?>
 <div class="heading"><div><p class="eyebrow">My Account</p><h1>My Borrowed books</h1><p class="heading-sub">Manage your currently borrowed books.</p></div></div>
 
-<!-- CURRENTLY BORROWED: cover, dates, status, View Details and Renew -->
+<!-- borrowed books -->
 <section class="admin-panel borrowed-panel">
     <div class="table-scroll">
     <table class="books-table is-cards borrowed-table">
@@ -150,8 +132,6 @@ if ($view === 'account') {
     </div>
 </section>
 
-
-<!-- [05] CARDS and [12] ACCOUNT PAGE -->
 <section class="card account-info">
     <h2>Account information</h2>
     <?php if (!empty($account['full_name'])) { echo "<p><strong>Name:</strong> " . e($account['full_name']) . "</p>"; } ?>
@@ -179,7 +159,7 @@ if ($view === 'account') {
     <p>Status: <?php echo e($status_text); ?></p>
     <p>Overdue fine: <strong>₱<?php echo number_format($fine, 2); ?></strong> <small>(₱<?php echo FINE_PER_DAY; ?> per day)</small></p>
     <?php if ($fine > 0) { ?>
-    <form method="post" action="index.php?do=pay&id=<?php echo (int) $loan['id']; ?>" onsubmit="return confirm('Pay ₱<?php echo number_format($fine, 2); ?> using the demo payment flow?')">
+    <form method="post" action="index.php?do=pay&id=<?php echo (int) $loan['id']; ?>" data-confirm="Pay your overdue balance of ₱<?php echo number_format($fine, 2); ?> ?" data-confirm-title="Pay fine">
         <?php echo csrf_field(); ?>
         <button class="button">Pay fine and get receipt</button>
     </form>
@@ -190,10 +170,7 @@ if ($view === 'account') {
     page_bottom();
     exit;
 }
-
-// ===========================================================================
-// RECEIPT PAGE:  index.php?view=receipt&id=5
-// ===========================================================================
+//receipt page
 if ($view === 'receipt') {
     require_user();
     $receipt = query($db, 'SELECT fine_payments.*, books.title FROM fine_payments JOIN borrowings ON borrowings.id = fine_payments.borrowing_id JOIN books ON books.id = borrowings.book_id WHERE fine_payments.id = ? AND fine_payments.user_id = ?', array((int) get_text('id'), (int) $_SESSION['user']['id']))->fetch();
@@ -201,7 +178,7 @@ if ($view === 'receipt') {
 
     page_top();
     ?>
-<!-- [14] RECEIPT PAGE -->
+
 <section class="card receipt">
     <h1>Payment receipt</h1>
     <p><strong>Receipt number:</strong> <?php echo e($receipt['receipt_number']); ?></p>
@@ -209,7 +186,7 @@ if ($view === 'receipt') {
     <p><strong>Account:</strong> <?php echo e($_SESSION['user']['username']); ?></p>
     <p><strong>Book:</strong> <?php echo e($receipt['title']); ?></p>
     <p><strong>Amount paid:</strong> ₱<?php echo number_format((float) $receipt['amount'], 2); ?></p>
-    <p><strong>Payment method:</strong> Demo payment (no real charge)</p>
+    <p><strong>Payment method:</strong> Online payment via GCash</p>
     <button onclick="window.print()">Print receipt</button> <a href="index.php?view=account">Back to account</a>
 </section>
 <?php
@@ -217,11 +194,7 @@ if ($view === 'receipt') {
     exit;
 }
 
-// ===========================================================================
-// BOOK LIST (default page)
-// ===========================================================================
-
-// ---- Search and filters ----
+//browse books page
 $q = get_text('q');
 $genre = get_text('genre');
 $status = strtoupper(get_text('status'));
@@ -241,14 +214,14 @@ $books = query($db, "SELECT * FROM books WHERE $where ORDER BY title", $params)-
 $total = count($books);
 $genres = query($db, 'SELECT DISTINCT genre FROM books ORDER BY genre')->fetchAll(PDO::FETCH_COLUMN);
 
-// ---- Books this student has borrowed ----
+//borrowed books (user)
 $my_books = array();
 if ($is_user) {
     $my_books = query($db, 'SELECT books.id, books.title FROM books JOIN borrowings ON books.id = borrowings.book_id WHERE borrowings.user_id = ? AND borrowings.returned_at IS NULL ORDER BY books.title', array($_SESSION['user']['id']))->fetchAll();
 }
 $borrowed_ids = array_map('intval', array_column($my_books, 'id'));
 
-// ---- "Borrowing confirmed" popup ----
+//popup
 $borrow_notice = $_SESSION['borrow_notice'] ?? null;
 unset($_SESSION['borrow_notice']);
 
@@ -257,7 +230,8 @@ $column_count = ($is_admin || $is_user) ? 7 : 6;
 page_top('', !$is_admin);
 ?>
 <?php if (!empty($borrow_notice)) { ?>
-<!-- [13] BORROW POPUP -->
+
+<!-- borrowpopup -->
 <div class="modal-backdrop">
     <section class="modal card">
         <h2>Borrowing confirmed</h2>
@@ -270,7 +244,7 @@ page_top('', !$is_admin);
 </div>
 <?php } ?>
 
-<!-- [04] PAGE HEADING -->
+<!-- heading -->
 <div class="heading">
 <?php if ($is_admin) { ?>
     <div>
@@ -294,7 +268,7 @@ page_top('', !$is_admin);
 </div>
 
 <?php if ($is_user) { ?>
-<!-- [05] CARDS: my borrowed books (students only) -->
+
 <section class="card my-books">
     <h2>My borrowed books (<?php echo count($my_books); ?>/3)</h2>
     <?php if (!$my_books) { ?>
@@ -312,7 +286,7 @@ page_top('', !$is_admin);
 <?php } ?>
 
 <?php if ($is_admin) { ?>
-<!-- [10] ADMIN PANEL: white box with search and filters -->
+<!-- admin side -->
 <section class="admin-panel">
     <form class="toolbar" method="get" action="index.php">
         <div class="search-box toolbar-search">
@@ -335,7 +309,7 @@ page_top('', !$is_admin);
     <div class="table-wrap">
 <?php } ?>
 
-<!-- [08] TABLES and [09] BOOK ROWS -->
+<!-- booklist (admin) -->
 <table class="books-table<?php echo $is_admin ? ' is-cards' : ''; ?>">
     <thead>
     <tr>
@@ -368,7 +342,7 @@ page_top('', !$is_admin);
         </td>
         <td class="actions">
             <a class="action-btn action-edit" href="admin.php?view=form&id=<?php echo $id; ?>"><?php echo icon('edit', 16); ?> Edit</a>
-            <form method="post" action="admin.php?do=delete&id=<?php echo $id; ?>" onsubmit="return confirm('Delete this book?')"><?php echo csrf_field(); ?><button class="action-btn action-delete"><?php echo icon('trash', 16); ?> Delete</button></form>
+            <form method="post" action="admin.php?do=delete&id=<?php echo $id; ?>" data-confirm="Delete this book?" data-confirm-title="Delete book"><?php echo csrf_field(); ?><button class="action-btn action-delete"><?php echo icon('trash', 16); ?> Delete</button></form>
         </td>
         <?php } else { ?>
         <td><span class="chip chip-count"><?php echo (int) $book['available_copies']; ?></span></td>

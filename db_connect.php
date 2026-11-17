@@ -1,31 +1,25 @@
 <?php
-// DATABASE CONNECTION + SHARED HELPERS + PAGE LAYOUT
-// Every page starts with:  include_once 'db_connect.php';
-
-// ---- Settings you may want to change ----
 $db_host = 'localhost';
 $db_name = 'book_catalog';
 $db_user = 'root';
 $db_pass = '';
 
-define('APP_NAME', 'SpaceBook');                                  // name in the top bar
-define('FINE_PER_DAY', 10);                                                 // pesos per overdue day
+define('APP_NAME', 'SpaceBook');                                  
+define('FINE_PER_DAY', 10);                                                 
 define('ADMIN_REGISTRATION_CODE', getenv('BOOK_ADMIN_CODE') ?: 'BOOK-ADMIN-2026');
 
 date_default_timezone_set('Asia/Manila');
 if (session_status() === PHP_SESSION_NONE) session_start();
 
-// ---- Connect to MySQL ----
+//database connection
 try {
     $db = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    $db->exec("SET time_zone = '+08:00'");   // same clock as PHP, so due dates and fines agree
+    $db->exec("SET time_zone = '+08:00'");
 } catch (PDOException $error) {
     die('Could not connect to the database. Check db_connect.php and import database.sql.');
 }
-
-// Runs one prepared query. Example: query($db, 'SELECT * FROM books WHERE id = ?', array($id))->fetch();
 function query($db, $sql, $params = array())
 {
     $stmt = $db->prepare($sql);
@@ -33,12 +27,8 @@ function query($db, $sql, $params = array())
     return $stmt;
 }
 
-// ---------------------------------------------------------------------------
-// TEXT AND DATES
-// ---------------------------------------------------------------------------
 function e($value) { return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8'); }
 
-// Date only, e.g. Aug 25, 2025
 function short_date($value)
 {
     $time = strtotime((string) $value);
@@ -51,23 +41,16 @@ function read_date($value)
     return $time ? date('M j, Y \a\t g:i A', $time) : '';
 }
 
-// Text from the address bar (?q=...), trimmed and shortened.
 function get_text($key, $max = 100)
 {
     $value = $_GET[$key] ?? '';
     return is_string($value) ? mb_substr(trim($value), 0, $max) : '';
 }
 
-// ---------------------------------------------------------------------------
-// WHO MAY OPEN A PAGE
-// ---------------------------------------------------------------------------
 function require_login() { if (!isset($_SESSION['user'])) { header('Location: auth.php'); exit; } }
 function require_admin() { require_login(); if ($_SESSION['user']['role'] !== 'ADMIN') { http_response_code(403); exit('You do not have permission to view this page.'); } }
 function require_user() { require_login(); if ($_SESSION['user']['role'] !== 'USER') { http_response_code(403); exit('You do not have permission to do that.'); } }
 
-// ---------------------------------------------------------------------------
-// CSRF: put csrf_field() inside every form that uses method post, and call check_csrf() when it is sent
-// ---------------------------------------------------------------------------
 function csrf_token() { if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32)); return $_SESSION['csrf']; }
 function csrf_field() { return '<input type="hidden" name="csrf" value="' . e(csrf_token()) . '">'; }
 
@@ -80,25 +63,17 @@ function check_csrf()
     }
 }
 
-// ---------------------------------------------------------------------------
-// FINES  (late days stop counting on the day the book is returned)
-// ---------------------------------------------------------------------------
 function late_days($due_at, $returned_at = null)
 {
     $due = (new DateTime($due_at))->setTime(0, 0);
     $end = $returned_at ? (new DateTime($returned_at))->setTime(0, 0) : new DateTime('today');
     return max(0, (int) $due->diff($end)->format('%r%a'));
 }
-
-// Fine still owed for one loan row (the row needs the 'paid' column).
 function fine_owed($loan)
 {
     return max(0, late_days($loan['due_at'], $loan['returned_at']) * FINE_PER_DAY - (float) $loan['paid']);
 }
-
-// ---------------------------------------------------------------------------
-// SMALL DISPLAY HELPERS
-// ---------------------------------------------------------------------------
+//helpers (very helpful)
 function book_code($id) { return 'BK 100-' . str_pad((string) (int) $id, 3, '0', STR_PAD_LEFT); }
 
 function initials($name)
@@ -107,14 +82,13 @@ function initials($name)
     return $name === '' ? '?' : mb_strtoupper(mb_substr($name, 0, 1));
 }
 
-// Cover picture, or a plain box when the book has no cover.
+//for book cover
 function cover_html($book)
 {
     if (!empty($book['cover_image'])) return '<img class="cover" src="uploads/covers/' . e(basename($book['cover_image'])) . '" alt="Cover of ' . e($book['title']) . '">';
     return '<div class="cover cover-empty">' . icon('book', 26) . '</div>';
 }
 
-// Small inline icons. Example: echo icon('plus');
 function icon($name, $size = 20)
 {
     $paths = array(
@@ -138,10 +112,7 @@ function icon($name, $size = 20)
     return '<svg class="icon" width="' . (int) $size . '" height="' . (int) $size . '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . ($paths[$name] ?? '') . '</svg>';
 }
 
-// ---------------------------------------------------------------------------
-// BOOK COVER UPLOAD
-// ---------------------------------------------------------------------------
-// Saves an uploaded cover in uploads/covers/ under a random name. Returns the file name, or false.
+//book cover upload
 function save_cover($file)
 {
     if ($file['error'] !== UPLOAD_ERR_OK || $file['size'] > 2 * 1024 * 1024 || !is_uploaded_file($file['tmp_name'])) return false;
@@ -161,10 +132,7 @@ function delete_cover($name)
     if (is_file($path)) @unlink($path);
 }
 
-// ---------------------------------------------------------------------------
-// CREATE AN ACCOUNT  (used by the register page and the first-admin setup)
-// Returns true when the account was created, or an error message.
-// ---------------------------------------------------------------------------
+//for registration(user or admin)
 function register_account($db, $data, $role = 'USER', $check_code = true)
 {
     if ($role === 'ADMIN' && $check_code && !hash_equals(ADMIN_REGISTRATION_CODE, (string) ($data['admin_code'] ?? ''))) return 'The admin registration code is incorrect.';
@@ -178,7 +146,6 @@ function register_account($db, $data, $role = 'USER', $check_code = true)
     if ($password !== $confirm) return 'The two passwords do not match.';
     if (query($db, 'SELECT id FROM users WHERE email = ?', array($email))->fetchColumn()) return 'An account with that email already exists.';
 
-    // The username is made from the email, so people can also log in with it.
     $base = preg_replace('/[^a-zA-Z0-9_]/', '_', strstr($email, '@', true));
     $base = substr(str_pad($base, 3, '_'), 0, 24);
     $username = $base;
@@ -194,11 +161,6 @@ function register_account($db, $data, $role = 'USER', $check_code = true)
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// PAGE LAYOUT: page_top() starts every page, page_bottom() ends it
-// $page_class = 'auth-page' hides the top bar (login and register pages)
-// $show_search = true shows the search box in the top bar
-// ---------------------------------------------------------------------------
 function page_top($page_class = '', $show_search = false)
 {
     $me = $_SESSION['user'] ?? null;
@@ -218,7 +180,7 @@ function page_top($page_class = '', $show_search = false)
 </head>
 <body class="<?php echo e($page_class); ?>">
 <?php if ($page_class !== 'auth-page') { ?>
-<!-- [03] TOP BAR -->
+
 <header class="topbar">
     <a class="brand" href="index.php">
         <span class="brand-logo"><?php echo icon('book', 26); ?></span>
@@ -247,8 +209,8 @@ function page_top($page_class = '', $show_search = false)
     </div>
 </header>
 <?php } ?>
+
 <?php
-// SIDEBAR (students and admins): links, then the signed-in person at the bottom
 $GLOBALS['has_sidebar'] = $me && $page_class !== 'auth-page';
 if ($GLOBALS['has_sidebar']) {
     global $db;
@@ -277,9 +239,9 @@ if ($GLOBALS['has_sidebar']) {
 </aside>
 <div class="app-main">
 <?php } ?>
+
 <main class="wrap">
 <?php
-    // [15] NOTICES: green message after an action
     if (!empty($_SESSION['flash'])) {
         echo "<div class='notice'>" . e($_SESSION['flash']) . "</div>";
         unset($_SESSION['flash']);
@@ -291,6 +253,40 @@ function page_bottom()
     ?>
 </main>
 <?php if (!empty($GLOBALS['has_sidebar'])) { echo '</div></div>'; } ?>
+
+<!-- popup for paying fine -->
+<script>
+(function () {
+    var pending = null;
+    var box = document.createElement('div');
+    box.className = 'confirm-backdrop';
+    box.hidden = true;
+    box.innerHTML = '<div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">'
+        + '<h3 id="confirm-title"></h3><p id="confirm-text"></p>'
+        + '<div class="confirm-actions"><button type="button" class="confirm-cancel">Cancel</button>'
+        + '<button type="button" class="confirm-ok">OK</button></div></div>';
+    document.body.appendChild(box);
+
+    var okBtn = box.querySelector('.confirm-ok');
+    function close() { box.hidden = true; pending = null; }
+
+    document.addEventListener('submit', function (ev) {
+        var form = ev.target;
+        if (!form.dataset || !form.dataset.confirm) return;
+        ev.preventDefault();
+        pending = form;
+        box.querySelector('#confirm-title').textContent = form.dataset.confirmTitle || 'Please confirm';
+        box.querySelector('#confirm-text').textContent = form.dataset.confirm;
+        box.hidden = false;
+        okBtn.focus();
+    });
+
+    okBtn.addEventListener('click', function () { var f = pending; close(); if (f) f.submit(); });
+    box.querySelector('.confirm-cancel').addEventListener('click', close);
+    box.addEventListener('click', function (ev) { if (ev.target === box) close(); });
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && !box.hidden) close(); });
+})();
+</script>
 </body>
 </html>
 <?php

@@ -102,7 +102,6 @@ if ($view === 'form') {
 </div>
 <?php if ($error) { echo "<div class='error'>" . e($error) . "</div>"; } ?>
 
-<!-- [07] FORMS -->
 <form class="card form" method="post" enctype="multipart/form-data">
     <?php echo csrf_field(); ?>
     <label>Title<input name="title" required maxlength="200" value="<?php echo e($book['title'] ?? ''); ?>"></label>
@@ -123,10 +122,7 @@ if ($view === 'form') {
     exit;
 }
 
-// ===========================================================================
-// CURRENT BORROWERS (default admin page)
-//   admin.php?filter=active|overdue    admin.php?page=2    admin.php?do=export (CSV)
-// ===========================================================================
+//list of borrowers
 $filter = get_text('filter');
 if ($filter !== 'active' && $filter !== 'overdue') $filter = '';
 
@@ -140,13 +136,13 @@ foreach ($loans as $i => $row) {
 $count_all = count($loans);
 $count_active = $count_all - $count_overdue;
 
-// Fines still unpaid on every loan (returned or not)
+//fines
 $outstanding = 0;
 foreach (query($db, 'SELECT due_at, returned_at, COALESCE((SELECT SUM(amount) FROM fine_payments WHERE borrowing_id = borrowings.id), 0) AS paid FROM borrowings')->fetchAll() as $row) {
     $outstanding += fine_owed($row);
 }
 
-// Apply the All / Active / Overdue tab
+
 $shown = array();
 foreach ($loans as $row) {
     if ($filter === 'overdue' && !$row['late']) continue;
@@ -154,12 +150,12 @@ foreach ($loans as $row) {
     $shown[] = $row;
 }
 
-// ---- Export reports: downloads the list on screen as a CSV file ----
+//exporting
 if (get_text('do') === 'export') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="borrowed-books-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
-    fwrite($out, "\xEF\xBB\xBF");   // lets Excel read the file as UTF-8
+    fwrite($out, "\xEF\xBB\xBF");
     fputcsv($out, array('Borrower', 'Email', 'Book', 'Borrowed', 'Due', 'Status'));
     foreach ($shown as $row) {
         $cells = array($row['full_name'] !== '' ? $row['full_name'] : $row['username'], $row['email'], $row['title'], read_date($row['borrowed_at']), read_date($row['due_at']), $row['late'] ? 'Overdue' : 'Active');
@@ -170,7 +166,6 @@ if (get_text('do') === 'export') {
     exit;
 }
 
-// ---- Pages of 10 ----
 $per_page = 10;
 $pages = max(1, (int) ceil(count($shown) / $per_page));
 $page = min($pages, max(1, (int) get_text('page')));
@@ -184,7 +179,7 @@ function borrowers_url($filter, $page = 1, $extra = array())
 
 page_top();
 ?>
-<!-- [04] PAGE HEADING -->
+<!-- heading -->
 <div class="heading">
     <div>
         <p class="eyebrow">Catalog Administration</p>
@@ -196,14 +191,12 @@ page_top();
     </div>
 </div>
 
-<!-- STATS -->
 <section class="stats-card">
     <div class="stat"><span class="stat-icon stat-ok"><?php echo icon('check', 22); ?></span><div><strong><?php echo $count_active; ?></strong><span>Active</span></div></div>
     <div class="stat"><span class="stat-icon stat-bad"><?php echo icon('alert', 22); ?></span><div><strong><?php echo $count_overdue; ?></strong><span>Overdue</span></div></div>
     <div class="stat"><span class="stat-icon stat-fine"><?php echo icon('wallet', 22); ?></span><div><strong>₱<?php echo number_format($outstanding, 2); ?></strong><span>Outstanding fines</span></div></div>
 </section>
 
-<!-- [08] TABLES and [11] STATUS BADGES -->
 <section class="admin-panel">
     <div class="tabs">
         <a class="tab<?php echo $filter === '' ? ' active' : ''; ?>" href="<?php echo e(borrowers_url('')); ?>">All Borrowed</a>
