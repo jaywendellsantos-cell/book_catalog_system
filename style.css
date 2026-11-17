@@ -324,6 +324,15 @@ h2 {
     font-weight: 700;
     color: var(--rose);
 }
+
+.heading-admin{
+    /*margin: auto;*/
+    margin-right: 295px;
+}
+
+.borrow-heading{
+    margin-right: 540px;
+}
 /* bookfound counter */
 .count-pill {
     padding: 14px 32px;
